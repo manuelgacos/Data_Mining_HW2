@@ -1,0 +1,1 @@
+'Hand_HW2.pdf' has my handwritten solutions to Exercises 1-5.  'HW_2.Rmd', 'HW_2.pdf' have my solutions to Exercises 6-9. All the 'RData' files have the stored objects of my simulations for exercises 7-9. Some chunks of code were taking a lot of time so when compiling I chose to save the objects and load them rather than running everything again.
