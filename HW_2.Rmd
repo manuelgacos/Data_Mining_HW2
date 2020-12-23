@@ -1,0 +1,1432 @@
+---
+title: "STAT 2270 Homework 2 Fall 2020"
+author: "Manuel Alejandro Garcia Acosta"
+date: "9/29/2020"
+output:
+  pdf_document:
+    includes:
+      in_header: "preamble.tex"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(glmnet)
+library(ggplot2)
+#setwd('/home/noble_mannu/Documents/PhD/Third/STAT_2270_Data_Mining/HW2/')
+source('/home/noble_mannu/Documents/PhD/Third/STAT_2270_Data_Mining/HW2/kfold.R')
+source('/home/noble_mannu/Documents/PhD/Third/STAT_2270_Data_Mining/HW2/bootstrap.R')
+```
+
+$\textbf{NOTES:}$ 
+
+- As usual, I'll be setting a seed whenever I run a function which uses random variables for reproducibility purposes.
+
+- For many codes that take quite a while to compile I saved the R objects into RData files, I include these in my submission. I load these files at the beggining of each exercise when compiling.
+
+- Related to the above, codes that weren't run for compiling will have the eval=FALSE option enabled. Need to change this to eval=TRUE  if you want to run them.
+
+# Exercise 6
+
+Bootstrapping can be used to estimate the sampling distribution of most statistics, but not all:
+
+## Part (a)
+
+Give an example of a statistic for which the bootstrap struggles to provide an accurate sampling distribution.
+
+Given a sample $X_{1},...,X_{n}$. Consider 
+
+$$T(\mathcal{X}) = \max_{i \in \{1,...,n\}} \{ X_{i} \}$$
+
+## Part (b)
+
+Demonstrate your example from part (a). Take 1000 samples of size 25 from a standard normal distribution, calculate your statistic on each one, and create a histogram.
+
+Here I just create 1000 samples with 25 observations each from a standard normal distribution and plot an histogram of the statistic $max\{X_{i}\}$.
+
+```{r}
+set.seed(2019)
+num <- 1:1000
+norm25 <- function(x){
+  rnorm(25)
+}
+samples <- lapply(num, norm25)
+
+vect.max <- sapply(samples,max)
+```
+
+```{r, echo=FALSE}
+hist(vect.max, main= 'Histogram of max{Xi}', xlab = 'max{Xi}')
+```
+
+This will be considered as the true distribution of $T(\mathcal{X})$.
+
+## Part (c)
+
+Now select one of your 1000 samples uniformly at random and take 1000 bootstrap samples. With each bootstrap sample, calculate the statistic and create a histogram.
+
+Here the 647th sample was selected. I get 1000 bootstrap samples of such sample and then plot an histogram of $\max\{X_{i}\}$.
+
+```{r}
+set.seed(2020)
+ind <- sample(num, size = 1)
+sample.ind <- samples[[ind]]
+get.sample <- function(x){
+  sample(sample.ind, size = 25, replace = TRUE)
+}
+boot.samples <- lapply(1:1000, get.sample)
+boot.vect.max <- sapply(boot.samples,max)
+```
+
+```{r, echo=FALSE}
+hist(boot.vect.max,main= 'Histogram of max{Xi} on bootstrap samples',
+     xlab = 'max{Xi}')
+```
+
+This will be considered as the distribution of $T(\mathcal{X})$ according to bootstrapping sample 647.
+
+## Part (d)
+
+How does your bootstrap distribution differ from the ``true'' sampling distribution? Give a brief explanation for why the bootstrap fails in your case.
+
+We can notice right away that the values for $\max\{X_{i}\}$ in the bootstrap samples are smaller than in the ``true'' distribution. Moreover, we can see that the number of times $T(\mathcal{X})=1.11$ is higher than we would expect. In this case the bootstrap failed to $\textit{capture}$ the true distribution of $T(\mathcal{X})$ since at the moment sample 647 was chosen the distribution of the max was set to be biased to the left (because of such sample having observations with small values).
+
+# Exercise 7
+
+```{r, include=FALSE}
+load('/home/noble_mannu/Documents/PhD/Third/STAT_2270_Data_Mining/HW2/ex7.RData')
+```
+
+Consider the function
+
+$$f (x) = (x − 2)^{4} − 4(x − 2)^{3} + 5(x − 2)$$
+
+$\textbf{NOTE:}$ You can find the objects of the code I'm not running while compiling the pdf in the file 'ex7.RData'
+
+## Part (a)
+
+Plot this function (in the form of a line) in black for values of x from 0 to 6. Now consider the model $Y = f (X) + \epsilon$. Generate data by taking a random sample of size 50 from this model with $X_{i} \overset{iid}{\sim} U(0,6)$ and $\epsilon_{i} \overset{iid}{\sim} N(0,25)$ for $i = 1, ..., 50$ and add these
+points to your existing plot in a different color.
+
+Here I just create the function and the observed sample.
+
+```{r}
+function7 <- function(x){
+  (x-2)^4 - 4*(x-2)^3 + 5*(x-2)
+}
+
+x <- seq(from = 0, to = 6, by = 0.01)
+y <- sapply(x, function7)
+
+df <- data.frame(x,y)
+names(df) <- c('x','y')
+
+set.seed(1981)
+x.a <- runif(n = 50, min = 0, max = 6)
+e.a <- rnorm(n = 50, mean = 0, sd = 5)
+y.a <- sapply(x.a, function7) + e.a
+
+data <- data.frame( 'x.a' = x.a, 'y.a' = y.a)
+```
+
+This is the plot of the original function along with the selected sample.
+
+```{r, echo=FALSE}
+ggplot() + geom_line(data= df, aes(x=x,y=y, colour = "True"))+
+  geom_point(data = data, aes(x=x.a,y=y.a, colour = 'Sample'))+
+  scale_color_manual(values = c('True' = 'black', 'Sample' = 'orange')) +
+  labs(title = 'True function and sample', y = 'f(x)', color = 'Function')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Part (b)
+
+Consider doing kernel regression on the data from part (a) using a Gaussian kernel with bandwidth $h$. For an appropriate (wide enough) range of bandwidth values, plot the $10-fold$ CV error of the model against $h$. Use this plot to select an appropriate value of h and call this $h_{G}$. Again plot the original function in black and now add this Gaussian kernel estimate to the plot (in the form of a line) in blue.
+
+For part (b) I considered the set of lambdas $\lambda \in \{0.1,0.11,0.12,\dots,2 \}$. For the Gaussian kernel I ran cross validation 200 times for each value of $h$ and then reported the mean of the test $MSE$.
+
+```{r, eval=FALSE}
+band <- seq(from = 0.1, to = 2, by =0.01)
+
+set.seed(1970)
+errors <- lapply(band, cv.kernel,x = x.a , y = y.a, kernel = 'gaussian', k = 10,
+                 repeats = 200)
+
+m.prueba <- do.call(rbind,errors)
+m.prueba <- cbind(band,m.prueba)
+m.prueba <- as.data.frame(m.prueba)
+```
+
+Here I just plot the train and test errors. After running cross validation the best value for $h$ is $h_{G}=0.13$ with corresponding test error $MSE=59.46374$.
+
+```{r}
+line.gaus <- sapply(x, nadaraya_watson, x= x.a, y = y.a, h=0.13, 
+                    kernel = 'gaussian' )
+df.b <- data.frame(df,line.gaus)
+```
+
+```{r, echo=FALSE}
+ggplot()+geom_line(data = m.prueba, aes(x = band, y = test, colour = 'test'))+
+  geom_line(data = m.prueba, aes(x = band, y = train, colour = 'train'))+
+  labs(x = 'lambda', y = 'MSE', title = 'Plot lambda vs MSE', color = 'Error')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Now I add the line estimate using the Gaussian kernel to the plot of part (a).
+
+```{r, echo=FALSE}
+ggplot() + geom_line(data= df, aes(x=x,y=y, colour = "True"))+
+  geom_point(data = data, aes(x=x.a,y=y.a, colour = 'Sample'))+
+  geom_line(data = df.b, aes(x = x, y = line.gaus, colour = 'gaussian'))+
+  scale_color_manual(values = c('True' = 'black', 'Sample' = 'orange', 
+                                'gaussian' = 'blue')) +
+labs(title = 'Plot true vs estimate of f(x) and sample', y = 'f(x)', color = 'Function')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Part (c)
+
+Now suppose we switch to the Epanechnikov kernel. Using the value $h_{G}$ you found in part (b), add the Epanechnikov kernel estimate to the plot as a dotted red line.
+
+Here I just plotted the estimated function using the Epanechnikov kernel for the bandwidth $h_{G}=0.13$. The estimate is plotted as a red dotted line with label 'epan1'.
+
+```{r}
+line.epan1 <- sapply(x, nadaraya_watson, x= x.a, y = y.a, h=0.13, 
+                     kernel = 'epanechnikov' )
+df.b$line.epan1 <- line.epan1
+```
+
+```{r, echo=FALSE}
+ggplot() + geom_line(data= df, aes(x=x,y=y, colour = "True"))+
+  geom_point(data = data, aes(x=x.a,y=y.a, colour = 'Sample'))+
+  geom_line(data = df.b, aes(x = x, y = line.gaus, colour = 'gaussian'))+
+  geom_line(data = df.b[!is.na(df.b$line.epan1),], aes(x = x, y = line.epan1, colour = 'epan1'), 
+            linetype = 'dotted')+
+  scale_color_manual(values = c('True' = 'black', 'Sample' = 'orange', 
+                                'gaussian' = 'blue', 'epan1' = 'red')) +
+  labs(title = 'Plot true vs estimates of f(x) and sample', y = 'f(x)', color = 'Function')+
+  theme(plot.title = element_text(hjust = 0.5))
+# NOTE: Needed to remove the NaN values from the Epanechnikov kernel
+```
+
+## Part (d)
+
+Now repeat part (b) using the Epanechnikov kernel and call the optimal bandwidth you find $h_{E}$. On the same plot from part (c), add the Epanechnikov kernel estimate with bandwidth $h_{E}$ as a solid red line.
+
+Here I ran kernel regression using cross validation. This time I just ran the procedure twice for each value of $h$ because it was taking way more time to compute the estimates with the Epanechnikov kernel as compared to the Gaussian kernel.
+
+```{r, eval=FALSE}
+set.seed(1971)
+errors1 <- lapply(band, cv.kernel,x = x.a , y = y.a, kernel = 'epanechnikov', 
+                  k = 10, repeats = 2)
+m.prueba1 <- do.call(rbind,errors1)
+m.prueba1 <- cbind(band,m.prueba1)
+m.prueba1 <- as.data.frame(m.prueba1)
+```
+
+After running cross validation, the best bandwidth $h$ for the Epanechnikov kernel was $h_{E}=0.32$ with test error $MSE = 57.12501$.
+
+```{r, echo=FALSE}
+ggplot()+
+  geom_line(data = m.prueba1[!is.na(m.prueba1$test),], 
+            aes(x = band, y = test, colour = 'test'))+
+  geom_line(data = m.prueba1, aes(x = band, y = train, colour = 'train'))+
+  labs(x = 'lambda', y = 'MSE', title = 'Plot lambda vs MSE', color = 'Error')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Here I plotted the estimated function using the Epanechnikov kernel for the bandwidth $h_{E}=0.32$. The estimate is plotted as a dark red line with label 'epan2'.
+
+```{r}
+line.epan2 <- sapply(x, nadaraya_watson, x= x.a, y = y.a, h=0.32, 
+                     kernel = 'epanechnikov' )
+df.b$line.epan2 <- line.epan2
+```
+
+```{r, echo=FALSE}
+ggplot() + geom_line(data= df, aes(x=x,y=y, colour = "True"))+
+  geom_point(data = data, aes(x=x.a,y=y.a, colour = 'Noise'))+
+  geom_line(data = df.b, aes(x = x, y = line.gaus, colour = 'gaussian'))+
+  geom_line(data = df.b[!is.na(df.b$line.epan1),], 
+            aes(x = x, y = line.epan1, colour = 'epan1'), linetype = 'dotted')+
+  geom_line(data = df.b[!is.na(df.b$line.epan2),],
+            aes(x = x, y = line.epan2, colour = 'epan2'))+
+  scale_color_manual(values = c('True' = 'black', 'Noise' = 'orange', 
+                                'gaussian' = 'blue', 'epan1' = 'red',
+                                'epan2' = 'darkred')) +
+  labs(color = 'Function')
+# NOTE: Needed to remove the NaN values from the Epanechnikov kernel
+```
+
+## Part (e)
+
+Compare the two different fits of the Epanechnikov kernel regression estimate. How much did the bandwidth change in part (d)? How does the best Epanechnikov kernel estimate compare with the best Gaussian kernel estimate?
+
+Even while running cross validation just twice for the Epanechnikov kernel and quite a lot more times for the Gaussian kernel the bandwidth didn't change much. Tuned values for the bandwidth went from $h_{G}=0.13$ to $h_{E}=0.32$, with a difference of $0.19$. As we can see in the plot, the Epanechnikov estimate is really close to the Gaussian estimate when both have been tuned.
+
+# Exercise 8
+
+Consider a standard linear model setup and suppose we have 50 (independent) covariates, but that only 5 of these (say the first five) have non-zero coefficients, with $\beta_{i} = i$ for $i = 1, ..., 5$. Finally, suppose we observe covariate values uniformly at random from the unit rectangle with standard iid Gaussian noise (i.e. $\epsilon \overset{iid}{\sim} N(0,1)$).
+
+$\textbf{NOTE:}$ For this exercise I used instead $\beta_{1}=1, \, \beta_{1}=1, \, \beta_{1}=2, \, \beta_{1}=3, \, \beta_{1}=5$.
+
+```{r, include=FALSE}
+load('/home/noble_mannu/Documents/PhD/Third/STAT_2270_Data_Mining/HW2/ex8.RData')
+```
+
+$\textbf{NOTE:}$ You can find the objects of the code I'm not running while compiling the pdf in the file 'ex8.RData','ex8pte.RData' and 'ex8pte2.RData'.
+
+## Part (a)
+
+Take a sample of size 25 and use 5-fold cross validation to fit a lasso model and record the resulting error. Call this $Err_{Lasso,1}(25)$.
+
+First I created the dataset. The set of lambdas I used for part (a) was between 1 and $1/100$.
+
+As usual I set a seed before running functions which involve randomness.
+
+```{r}
+iterations <- 25
+variables <- 50
+x <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1991)
+for(i in 1:variables){
+  temp <- runif(25, min = 0, max = 1)
+  x[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x) <- nom
+
+x1 <- x[,1]
+x2 <- x[,2]
+x3 <- x[,3]
+x4 <- x[,4]
+x5 <- x[,5]
+e <- rnorm(25, mean = 0, sd = 1)
+y <- x1+x2+2*x3+3*x4+5*x5+e
+
+data <- data.frame(x,y)
+
+# Creating a set of possible values for lambda
+lambdas <- 10^seq(0,-2,length.out=100)
+```
+
+Now I run 5-fold cross validation 10 times to find $Err_{Lasso,1}(25)$.
+
+```{r}
+set.seed(1995)
+fit <- cv.lasso(x=x, y=y, alpha = 1, lambda = lambdas, k=5,repeats = 10)
+best.lambda <- best.lambda.test(fit)
+best.mse.test <- best.mse.lasso(fit)
+```
+
+Here The best lambda was $\lambda = 0.1123324$ and the error test was $MSE=1.688348$.
+
+## Part (b)
+
+Repeat part (a) 1000 times to obtain $Err_{Lasso,1}(25)$, ..., $Err_{Lasso,1000}(25)$. In addition, each time you fit a lasso model, determine which covariates are given non-zero coefficient estimates. Take these covariates and fit a standard linear model on only these. Record this error to obtain $Err_{OLS,1}(25)$, ..., $Err_{OLS,1000}(25)$.
+
+For computing the 1000 errors, I just ran CV once each time. The result of this procedure can be found in 'output1'.
+
+```{r, eval=FALSE}
+set.seed(1989)
+fit1 <- lapply(1:1000, function(z){
+  mse.lasso.ols( x = x, y = y, data = data, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+output1 <- do.call(rbind,fit1)
+```
+
+## Part (c)
+
+In general, define
+
+$$\overline{Err}_{Lasso}(n) = \frac{1}{1000}\sum_{i=1}^{1000}Err_{Lasso,i}(n)$$
+
+and equivalently for the OLS errors. Calculate $\overline{Err}_{Lasso}(25)$ and $\overline{Err}_{OLS}(25)$ and take the difference.
+
+Here we just need to use the result from part (b). Computing such means gives $\overline{Err}_{Lasso}(25) =1.764167$ and $\overline{Err}_{OLS}(25) = 0.1193118$. The difference is 
+
+$$\overline{Err}_{Lasso}(25)-\overline{Err}_{OLS}(25) = 1.644856$$
+
+```{r}
+err.lasso.25 <- mean(output1[,2])
+err.ols.25 <- mean(output1[,3])
+diff.25 <- err.lasso.25 - err.ols.25
+```
+
+## Part (d)
+
+Explore if/how the difference in errors changes with n. For example, you might
+consider something like n = 25, 50, 100, 250, 500, 1000.
+
+I got $\overline{Err}_{Lasso}(n)$ and $\overline{Err}_{OLS}(n)$ for sample sizes $n = 50,\, 100,\, 250,\, 500,1000$ in addition to the ones obtained in part (c).
+All these are stored in the objects 'output2', 'output3', 'output4', 'output5', 'output6'. These simulations started to last for about an hour so I stored them and set the code to eval=FALSE. 
+
+I'm omitting the code for this in the pdf but you can find it in the Rmd file of my HW.
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 50
+set.seed(1980)
+iterations <- 50
+variables <- 50
+x <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1991)
+for(i in 1:variables){
+  temp <- runif(25, min = 0, max = 1)
+  x[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x) <- nom
+
+x1 <- x[,1]
+x2 <- x[,2]
+x3 <- x[,3]
+x4 <- x[,4]
+x5 <- x[,5]
+e <- rnorm(25, mean = 0, sd = 1)
+y <- x1+x2+2*x3+3*x4+5*x5+e
+
+data <- data.frame(x,y)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 50
+set.seed(1980)
+fit2 <- lapply(1:1000, function(z){
+  mse.lasso.ols( x = x, y = y, data = data, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+output2 <- do.call(rbind,fit2)
+
+```
+
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 100
+iterations <- 100
+variables <- 50
+x <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1992)
+for(i in 1:variables){
+  temp <- runif(25, min = 0, max = 1)
+  x[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x) <- nom
+
+x1 <- x[,1]
+x2 <- x[,2]
+x3 <- x[,3]
+x4 <- x[,4]
+x5 <- x[,5]
+e <- rnorm(25, mean = 0, sd = 1)
+y <- x1+x2+2*x3+3*x4+5*x5+e
+
+data <- data.frame(x,y)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 100
+set.seed(1982)
+fit3 <- lapply(1:1000, function(z){
+  mse.lasso.ols( x = x, y = y, data = data, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+output3 <- do.call(rbind,fit3)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 250
+iterations <- 250
+variables <- 50
+x <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1993)
+for(i in 1:variables){
+  temp <- runif(25, min = 0, max = 1)
+  x[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x) <- nom
+
+x1 <- x[,1]
+x2 <- x[,2]
+x3 <- x[,3]
+x4 <- x[,4]
+x5 <- x[,5]
+e <- rnorm(25, mean = 0, sd = 1)
+y <- x1+x2+2*x3+3*x4+5*x5+e
+
+data <- data.frame(x,y)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 250
+set.seed(1983)
+fit4 <- lapply(1:1000, function(z){
+  mse.lasso.ols( x = x, y = y, data = data, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+output4 <- do.call(rbind,fit4)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 500
+iterations <- 500
+variables <- 50
+x <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1994)
+for(i in 1:variables){
+  temp <- runif(25, min = 0, max = 1)
+  x[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x) <- nom
+
+x1 <- x[,1]
+x2 <- x[,2]
+x3 <- x[,3]
+x4 <- x[,4]
+x5 <- x[,5]
+e <- rnorm(25, mean = 0, sd = 1)
+y <- x1+x2+2*x3+3*x4+5*x5+e
+
+data <- data.frame(x,y)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 500
+set.seed(1984)
+fit5 <- lapply(1:1000, function(z){
+  mse.lasso.ols( x = x, y = y, data = data, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+output5 <- do.call(rbind,fit5)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 1000
+iterations <- 1000
+variables <- 50
+x <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1994)
+for(i in 1:variables){
+  temp <- runif(25, min = 0, max = 1)
+  x[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x) <- nom
+
+x1 <- x[,1]
+x2 <- x[,2]
+x3 <- x[,3]
+x4 <- x[,4]
+x5 <- x[,5]
+e <- rnorm(25, mean = 0, sd = 1)
+y <- x1+x2+2*x3+3*x4+5*x5+e
+
+data <- data.frame(x,y)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# This code is for sample size 1000
+set.seed(1984)
+fit6 <- lapply(1:1000, function(z){
+  mse.lasso.ols( x = x, y = y, data = data, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+output6 <- do.call(rbind,fit6)
+```
+
+```{r, include=FALSE}
+err.lasso.50 <- mean(output2[,2])
+err.ols.50 <- mean(output2[,3])
+diff.50 <- err.lasso.50 - err.ols.50
+
+err.lasso.100 <- mean(output3[,2])
+err.ols.100 <- mean(output3[,3])
+diff.100 <- err.lasso.100 - err.ols.100
+
+err.lasso.250 <- mean(output4[,2])
+err.ols.250 <- mean(output4[,3])
+diff.250 <- err.lasso.250 - err.ols.250
+
+err.lasso.500 <- mean(output5[,2])
+err.ols.500 <- mean(output5[,3])
+diff.500 <- err.lasso.500 - err.ols.500
+
+err.lasso.1000 <- mean(output6[,2])
+err.ols.1000 <- mean(output6[,3])
+diff.1000 <- err.lasso.1000 - err.ols.1000
+```
+
+As we can see in the following plots, as the sample size $n$ increases, $\overline{Err}_{Lasso}(n)$ and $\overline{Err}_{OLS}(n)$ become really close. From sample size 250 and bigger the difference becomes negligible.
+
+```{r, echo=FALSE}
+errors.lasso <- c(err.lasso.25,err.lasso.50,err.lasso.100,err.lasso.250,
+                   err.lasso.500,err.lasso.1000)
+errors.ols <- c(err.ols.25,err.ols.50,err.ols.100,err.ols.250,
+                   err.ols.500,err.ols.1000)
+errors.dif <- c(diff.25,diff.50,diff.100,diff.250,diff.500,diff.1000)
+size <-c(25,50,100,250,500,1000)
+
+df8 <- data.frame('size' = size, 'lasso' = errors.lasso, 'ols' = errors.ols,
+                  'difference' = errors.dif )
+
+ggplot(data = df8)+geom_line(aes(x=size,y=lasso, colour = 'Lasso'))+
+            geom_line(aes(x=size,y=ols, colour = 'OLS'))+
+            labs(title = 'Lasso and OLS errors', 
+                 x = 'Sample size (n)', y = 'Error', color = 'Errors')+
+            theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r, echo=FALSE}
+ggplot(data = df8)+geom_line(aes(x=size,y=difference))+
+            labs(title = 'Err_Lasso(n) - Err_OLS(n)', 
+                 x = 'Sample size (n)', y = 'Difference')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Part (e)
+
+You might expect things to behave differently depending on the problem set-up. What if there were even more parameters and many of them had non-zero coefficients? What if the covariates weren’t independent but (at least some) exhibited some correlation? Make some modifications to the original problem to explore these aspects and see what you can conclude.
+
+### Part (e)-1
+
+```{r, include=FALSE}
+load('ex8pte.RData')
+```
+
+What I did different here was that the I created 70 independent covariates and the first 60 had non-zero coefficients in the true model. In fact, $\beta_{i}=1$ for $i=1,...,60$. In addition, I computed the mean over 100 repetitions instead of 1000.
+
+$$\overline{Err}_{Lasso}(n)=\sum_{i=1}^{100}Err_{Lasso,i}(n)$$
+
+Similarly for $\overline{Err}_{OLS}(n)$. Sample sizes were once again $n=25,50,100,250,500,1000$. The result I got was quite similar, since as the sample size $n$ increases, $\overline{Err}_{Lasso}(n)$ and $\overline{Err}_{OLS}(n)$ become really close as you can see in the plots.
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 25
+iterations <- 25
+variables <- 70
+x.e1 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1950)
+for(i in 1:variables){
+  temp <- runif(iterations, min = 0, max = 1)
+  x.e1[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x.e1) <- nom
+
+for (i in 1:60) {
+  assign(paste0('x',i),x.e1[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 1:60) {
+  y <- y+x.e1[,i]
+}
+
+e1 <- rnorm(iterations, mean = 0, sd = 1)
+y.e1 <- y+e1
+
+data.e1 <- data.frame(x.e1,y.e1)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 25
+set.seed(1960)
+model1 <- lapply(1:100, function(z){
+  mse.lasso.ols( x = x.e1, y = y.e1, data = data.e1, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exit1 <- do.call(rbind,model1)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 50
+iterations <- 50
+variables <- 70
+x.e2 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1951)
+for(i in 1:variables){
+  temp <- runif(iterations, min = 0, max = 1)
+  x.e2[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x.e2) <- nom
+
+for (i in 1:60) {
+  assign(paste0('x',i),x.e2[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 1:60) {
+  y <- y+x.e2[,i]
+}
+
+e2 <- rnorm(iterations, mean = 0, sd = 1)
+y.e2 <- y+e2
+
+data.e2 <- data.frame(x.e2,y.e2)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 50
+set.seed(1961)
+model2 <- lapply(1:100, function(z){
+  mse.lasso.ols( x = x.e2, y = y.e2, data = data.e2, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exit2 <- do.call(rbind,model2)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 100
+iterations <- 100
+variables <- 70
+x.e3 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1952)
+for(i in 1:variables){
+  temp <- runif(iterations, min = 0, max = 1)
+  x.e3[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x.e3) <- nom
+
+for (i in 1:60) {
+  assign(paste0('x',i),x.e3[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 1:60) {
+  y <- y+x.e3[,i]
+}
+
+e3 <- rnorm(iterations, mean = 0, sd = 1)
+y.e3 <- y+e3
+
+data.e3 <- data.frame(x.e3,y.e3)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 100
+set.seed(1962)
+model3 <- lapply(1:100, function(z){
+  mse.lasso.ols( x = x.e3, y = y.e3, data = data.e3, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exit3 <- do.call(rbind,model3)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 250
+iterations <- 250
+variables <- 70
+x.e4 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1953)
+for(i in 1:variables){
+  temp <- runif(iterations, min = 0, max = 1)
+  x.e4[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x.e4) <- nom
+
+for (i in 1:60) {
+  assign(paste0('x',i),x.e4[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 1:60) {
+  y <- y+x.e4[,i]
+}
+
+e4 <- rnorm(iterations, mean = 0, sd = 1)
+y.e4 <- y+e4
+
+data.e4 <- data.frame(x.e4,y.e4)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 250
+set.seed(1963)
+model4 <- lapply(1:100, function(z){
+  mse.lasso.ols( x = x.e4, y = y.e4, data = data.e4, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exit4 <- do.call(rbind,model4)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 500
+iterations <- 500
+variables <- 70
+x.e5 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1954)
+for(i in 1:variables){
+  temp <- runif(iterations, min = 0, max = 1)
+  x.e5[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x.e5) <- nom
+
+for (i in 1:60) {
+  assign(paste0('x',i),x.e5[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 1:60) {
+  y <- y+x.e5[,i]
+}
+
+e5 <- rnorm(iterations, mean = 0, sd = 1)
+y.e5 <- y+e5
+
+data.e5 <- data.frame(x.e5,y.e5)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 500
+set.seed(1964)
+model5 <- lapply(1:100, function(z){
+  mse.lasso.ols( x = x.e5, y = y.e5, data = data.e5, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exit5 <- do.call(rbind,model5)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 1000
+iterations <- 1000
+variables <- 70
+x.e6 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1955)
+for(i in 1:variables){
+  temp <- runif(iterations, min = 0, max = 1)
+  x.e6[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x.e6) <- nom
+
+for (i in 1:60) {
+  assign(paste0('x',i),x.e6[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 1:60) {
+  y <- y+x.e6[,i]
+}
+
+e6 <- rnorm(iterations, mean = 0, sd = 1)
+y.e6 <- y+e6
+
+data.e6 <- data.frame(x.e6,y.e6)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 1000
+set.seed(1965)
+model6 <- lapply(1:100, function(z){
+  mse.lasso.ols( x = x.e6, y = y.e6, data = data.e6, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exit6 <- do.call(rbind,model6)
+```
+
+```{r, include=FALSE}
+err.lasso.25 <- mean(exit1[,2])
+err.ols.25 <- mean(exit1[,3])
+diff.25 <- err.lasso.25 - err.ols.25
+
+err.lasso.50 <- mean(exit2[,2])
+err.ols.50 <- mean(exit2[,3])
+diff.50 <- err.lasso.50 - err.ols.50
+
+err.lasso.100 <- mean(exit3[,2])
+err.ols.100 <- mean(exit3[,3])
+diff.100 <- err.lasso.100 - err.ols.100
+
+err.lasso.250 <- mean(exit4[,2])
+err.ols.250 <- mean(exit4[,3])
+diff.250 <- err.lasso.250 - err.ols.250
+
+err.lasso.500 <- mean(exit5[,2])
+err.ols.500 <- mean(exit5[,3])
+diff.500 <- err.lasso.500 - err.ols.500
+
+err.lasso.1000 <- mean(exit6[,2])
+err.ols.1000 <- mean(exit6[,3])
+diff.1000 <- err.lasso.1000 - err.ols.1000
+```
+
+```{r, echo=FALSE}
+errors.lasso <- c(err.lasso.25,err.lasso.50,err.lasso.100,err.lasso.250,
+                   err.lasso.500,err.lasso.1000)
+errors.ols <- c(err.ols.25,err.ols.50,err.ols.100,err.ols.250,
+                   err.ols.500,err.ols.1000)
+errors.dif <- c(diff.25,diff.50,diff.100,diff.250,diff.500,diff.1000)
+size <-c(25,50,100,250,500,1000)
+
+df8 <- data.frame('size' = size, 'lasso' = errors.lasso, 'ols' = errors.ols, 'difference' = errors.dif )
+
+ggplot(data = df8)+geom_line(aes(x=size,y=lasso, colour = 'Lasso'))+
+            geom_line(aes(x=size,y=ols, colour = 'OLS'))+
+            labs(title = 'Lasso and OLS errors', 
+                 x = 'Sample size (n)', y = 'Error', color = 'Errors')+
+            theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r, echo=FALSE}
+ggplot(data = df8)+geom_line(aes(x=size,y=difference))+
+            labs(title = 'Err_Lasso(n) - Err_OLS(n)', 
+                 x = 'Sample size (n)', y = 'Difference')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+### Part (e)-2
+
+```{r, include=FALSE}
+load('ex8pte2.RData')
+```
+
+What I did different here was that the I created 50 covariates and the covariates 16 through 30 were defined as
+
+$$X_{i+15} = \sum_{j=1}^{i+1}X_{j}$$
+
+this way some of the covariates were correlated. In this dataset $X_{26}, X_{27}, X_{28}, X_{29}, X_{30}$ had non-zero coefficients in the true model ($\beta_{i}=1$ for $i=26,...,30$). In addition, I computed the mean over 20 repetitions instead of 1000.
+
+$$\overline{Err}_{Lasso}(n)=\sum_{i=1}^{20}Err_{Lasso,i}(n)$$
+
+Similarly for $\overline{Err}_{OLS}(n)$. Sample sizes were $n=25,50,100,250,500,1000$. The result I got was again similar. As the sample size $n$ increases, $\overline{Err}_{Lasso}(n)$ and $\overline{Err}_{OLS}(n)$ become close.
+
+It is worth mentioning that in the examples given in part(e)-1 and part(e)-2 the Lasso error doesn't approximate the OLS error as fast as it does in the original setup given on parts (a)-(d).
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 25
+iterations <- 25
+variables <- 50
+xe.1 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1930)
+for(i in 1:50){
+  temp <- runif(iterations, min = 0, max = 1)
+  xe.1[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(xe.1) <- nom
+
+for (i in 1:15) {
+  j <- i+1
+  xe.1[,i+15] <- rowSums(xe.1[,1:j])
+}
+
+for (i in 26:30) {
+  assign(paste0('x',i),xe.1[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 26:30) {
+  y <- y+xe.1[,i]
+}
+
+e.1 <- rnorm(iterations, mean = 0, sd = 1)
+ye.1 <- y+e.1
+
+datae.1 <- data.frame(xe.1,ye.1)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 25
+set.seed(1940)
+modele.1 <- lapply(1:20, function(z){
+  mse.lasso.ols( x = xe.1, y = ye.1, data = datae.1, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exite.1 <- do.call(rbind,modele.1)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 50
+iterations <- 50
+variables <- 50
+xe.2 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1931)
+for(i in 1:50){
+  temp <- runif(iterations, min = 0, max = 1)
+  xe.2[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(xe.2) <- nom
+
+for (i in 1:15) {
+  j <- i+1
+  xe.2[,i+15] <- rowSums(xe.2[,1:j])
+}
+
+for (i in 26:30) {
+  assign(paste0('x',i),xe.2[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 26:30) {
+  y <- y+xe.2[,i]
+}
+
+e.2 <- rnorm(iterations, mean = 0, sd = 1)
+ye.2 <- y+e.2
+
+datae.2 <- data.frame(xe.2,ye.2)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 50
+set.seed(1941)
+modele.2 <- lapply(1:20, function(z){
+  mse.lasso.ols( x = xe.2, y = ye.2, data = datae.2, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exite.2 <- do.call(rbind,modele.2)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 100
+iterations <- 100
+variables <- 50
+xe.3 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1932)
+for(i in 1:50){
+  temp <- runif(iterations, min = 0, max = 1)
+  xe.3[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(xe.3) <- nom
+
+for (i in 1:15) {
+  j <- i+1
+  xe.3[,i+15] <- rowSums(xe.3[,1:j])
+}
+
+for (i in 26:30) {
+  assign(paste0('x',i),xe.3[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 26:30) {
+  y <- y+xe.3[,i]
+}
+
+e.3 <- rnorm(iterations, mean = 0, sd = 1)
+ye.3 <- y+e.3
+
+datae.3 <- data.frame(xe.3,ye.3)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 100
+set.seed(1942)
+modele.3 <- lapply(1:20, function(z){
+  mse.lasso.ols( x = xe.3, y = ye.3, data = datae.3, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exite.3 <- do.call(rbind,modele.3)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 250
+iterations <- 250
+variables <- 50
+xe.4 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1933)
+for(i in 1:50){
+  temp <- runif(iterations, min = 0, max = 1)
+  xe.4[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(xe.4) <- nom
+
+for (i in 1:15) {
+  j <- i+1
+  xe.4[,i+15] <- rowSums(xe.4[,1:j])
+}
+
+for (i in 26:30) {
+  assign(paste0('x',i),xe.4[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 26:30) {
+  y <- y+xe.4[,i]
+}
+
+e.4 <- rnorm(iterations, mean = 0, sd = 1)
+ye.4 <- y+e.4
+
+datae.4 <- data.frame(xe.4,ye.4)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 250
+set.seed(1943)
+modele.4 <- lapply(1:20, function(z){
+  mse.lasso.ols( x = xe.4, y = ye.4, data = datae.4, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exite.4 <- do.call(rbind,modele.4)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 500
+iterations <- 500
+variables <- 50
+xe.5 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1934)
+for(i in 1:50){
+  temp <- runif(iterations, min = 0, max = 1)
+  xe.5[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(xe.5) <- nom
+
+for (i in 1:15) {
+  j <- i+1
+  xe.5[,i+15] <- rowSums(xe.5[,1:j])
+}
+
+for (i in 26:30) {
+  assign(paste0('x',i),xe.5[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 26:30) {
+  y <- y+xe.5[,i]
+}
+
+e.5 <- rnorm(iterations, mean = 0, sd = 1)
+ye.5 <- y+e.5
+
+datae.5 <- data.frame(xe.5,ye.5)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 500
+set.seed(1944)
+modele.5 <- lapply(1:20, function(z){
+  mse.lasso.ols( x = xe.5, y = ye.5, data = datae.5, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exite.5 <- do.call(rbind,modele.5)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 1000
+iterations <- 1000
+variables <- 50
+xe.6 <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1935)
+for(i in 1:50){
+  temp <- runif(iterations, min = 0, max = 1)
+  xe.6[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(xe.6) <- nom
+
+for (i in 1:15) {
+  j <- i+1
+  xe.6[,i+15] <- rowSums(xe.6[,1:j])
+}
+
+for (i in 26:30) {
+  assign(paste0('x',i),xe.6[,i])  
+}
+y <- c(rep(0, times = iterations))
+for (i in 26:30) {
+  y <- y+xe.6[,i]
+}
+
+e.6 <- rnorm(iterations, mean = 0, sd = 1)
+ye.6 <- y+e.6
+
+datae.6 <- data.frame(xe.6,ye.6)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Sample size 1000
+set.seed(1945)
+modele.6 <- lapply(1:20, function(z){
+  mse.lasso.ols( x = xe.6, y = ye.6, data = datae.6, alpha = 1, 
+                 lambda = lambdas, k =5, repeats = 1 )
+})
+exite.6 <- do.call(rbind,modele.6)
+```
+
+```{r, include=FALSE}
+err.lasso.25 <- mean(exite.1[,2])
+err.ols.25 <- mean(exite.1[,3])
+diff.25 <- err.lasso.25 - err.ols.25
+
+err.lasso.50 <- mean(exite.2[,2])
+err.ols.50 <- mean(exite.2[,3])
+diff.50 <- err.lasso.50 - err.ols.50
+
+err.lasso.100 <- mean(exite.3[,2])
+err.ols.100 <- mean(exite.3[,3])
+diff.100 <- err.lasso.100 - err.ols.100
+
+err.lasso.250 <- mean(exite.4[,2])
+err.ols.250 <- mean(exite.4[,3])
+diff.250 <- err.lasso.250 - err.ols.250
+
+err.lasso.500 <- mean(exite.5[,2])
+err.ols.500 <- mean(exite.5[,3])
+diff.500 <- err.lasso.500 - err.ols.500
+
+err.lasso.1000 <- mean(exite.6[,2])
+err.ols.1000 <- mean(exite.6[,3])
+diff.1000 <- err.lasso.1000 - err.ols.1000
+```
+
+```{r, echo=FALSE}
+errors.lasso <- c(err.lasso.25,err.lasso.50,err.lasso.100,err.lasso.250,
+                   err.lasso.500,err.lasso.1000)
+errors.ols <- c(err.ols.25,err.ols.50,err.ols.100,err.ols.250,
+                   err.ols.500,err.ols.1000)
+errors.dif <- c(diff.25,diff.50,diff.100,diff.250,diff.500,diff.1000)
+size <-c(25,50,100,250,500,1000)
+
+df8 <- data.frame('size' = size, 'lasso' = errors.lasso, 'ols' = errors.ols,
+                  'difference' = errors.dif )
+
+ggplot(data = df8)+geom_line(aes(x=size,y=lasso, colour = 'Lasso'))+
+            geom_line(aes(x=size,y=ols, colour = 'OLS'))+
+            labs(title = 'Lasso and OLS errors', 
+                 x = 'Sample size (n)', y = 'Error', color = 'Errors')+
+            theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r, echo=FALSE}
+ggplot(data = df8)+geom_line(aes(x=size,y=difference))+
+            labs(title = 'Err_Lasso(n) - Err_OLS(n)', 
+                 x = 'Sample size (n)', y = 'Difference')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Part (f)
+
+When (if ever) would it be good to do OLS after Lasso? Intuitively, why might it make sense to do that? This is closely related to the idea of the relaxed lasso [Meinshausen (2007), ‘Relaxed lasso’, Computational Statistics & Data Analysis]. Have a look at this paper and give a short description of what is being suggested. Code up this estimator and apply it to some of the settings above to see when it tends to outperform the Lasso and OLS methods alone.
+
+The lasso shrinkage causes the estimates of the non-zero coefficients to be biased towards zero and in general they are not consistent. One way we can reduce this bias is running Lasso first to identidy the predictos with non-zero coefficient estimates (kind of doing model selection) first. Then we can run OLS on the remaining predictors with the benefit that these estimates are the best unbiased linear estimates.
+
+Relaxed Lasso is proposed to deal with high dimensional data in situations were the number of predictor variables $p$ is large and potentially larger than the number of observations $n$. Meinshausen(2007) states that for no value of $\gamma$ the Bridge estimators 
+
+$$\hat{\beta}^{\lambda.\gamma} = \underset{\beta}{\operatorname{argmin}} \frac{1}{n} \sum_{i=1}^{n}(Y_{i} -X_{i}^{T}\beta)^{2} + \lambda||\beta||_{\gamma}$$
+
+achieve a satisfactory performance in terms of computational complexity and fast convergence rates (of the coefficients). 
+
+Meinshausen shows in his paper that the shrinkage of the Lasso leads to low convergence rate of the $\ell_{2}$-loss for high dimensional problems where the number ofparameters $p_{n}$ grows almost exponentially fast with $n$, so that $p_{n} >> n$. A two-stage procedure named $\textit{relaxed lasso}$ is proposed to work around this problem.
+
+The idea is to use cross-validation to estimate the initial penalty parameter for the Lasso, then a second time to the predictors with non-zero coefficient estimates. ``Since the variables in the second step have less "competition" from noise variables, cross-validation will tend to pick a smaller value for $\lambda$ [the penalty parameter], and hence their coefficients will be shrunken less than those in the initial estimate'' (Hastie, 2017, p. 91).
+
+Here I applied Relazed Lasso, or $\textit{Relaxo}$, to the setup from part(e)-2. The results were interesting since Relaxo outperformed $OLS$ and $Lasso$.
+
+```{r, include=FALSE}
+library(relaxo)
+load('ex8ptf.RData')
+```
+
+```{r, eval=FALSE, include=FALSE}
+x.re1 <- scale(xe.1)
+x.re2 <- scale(xe.2)
+x.re3 <- scale(xe.3)
+x.re4 <- scale(xe.4)
+x.re5 <- scale(xe.5)
+x.re6 <- scale(xe.6)
+
+y.re1  <- scale(ye.1)
+y.re2  <- scale(ye.2)
+y.re3  <- scale(ye.3)
+y.re4  <- scale(ye.4)
+y.re5  <- scale(ye.5)
+y.re6  <- scale(ye.6)
+
+## Compute cross-validated solution with optimal## predictive performance and print relaxation parameter phi and## penalty parameter lambda of the found solution
+
+relaxo1 <- cvrelaxo(X=x.re1,Y=y.re1, K =5, fast = FALSE)
+relaxo2 <- cvrelaxo(X=x.re2,Y=y.re2, K =5, fast = FALSE)
+relaxo3 <- cvrelaxo(X=x.re3,Y=y.re3, K =5, fast = FALSE)
+relaxo4 <- cvrelaxo(X=x.re4,Y=y.re4, K =5, fast = FALSE)
+relaxo5 <- cvrelaxo(X=x.re5,Y=y.re5, K =5, fast = FALSE)
+relaxo6 <- cvrelaxo(X=x.re6,Y=y.re6, K =5, fast = FALSE)
+
+print(cvobject$phi)
+print(cvobject$lambda)
+## Compute fitted values and plot them versus actual values
+mse.re1 <- mean((predict(relaxo1) - y.re1)^2)
+mse.re2 <- mean((predict(relaxo2) - y.re2)^2)
+mse.re3 <- mean((predict(relaxo3) - y.re3)^2)
+mse.re4 <- mean((predict(relaxo4) - y.re4)^2)
+mse.re5 <- mean((predict(relaxo5) - y.re5)^2)
+mse.re6 <- mean((predict(relaxo6) - y.re6)^2)
+
+```
+
+```{r, echo=FALSE}
+df8$relaxo <- c(mse.re1,mse.re2,mse.re3,mse.re4,mse.re5,mse.re6)
+
+ggplot(data = df8)+geom_line(aes(x=size,y=lasso, colour = 'Lasso'))+
+            geom_line(aes(x=size,y=ols, colour = 'OLS'))+
+            geom_line(aes(x=size,y=relaxo, colour = 'Relaxo'))+
+            labs(title = 'Lasso, OLS and Relaxo errors', 
+                 x = 'Sample size (n)', y = 'Error', color = 'Errors')+
+            theme(plot.title = element_text(hjust = 0.5))
+```
+
+# Exercise 9
+
+Assume the same original setup as in problem 8: a standard linear model with 50 independent covariates with non-zero coefficients for the first 5 variables only.
+
+```{r, include=FALSE}
+load('ex9.RData')
+```
+
+## Part (a)
+
+Draw a sample of size 25 with iid Gaussian noise assuming covariate values are sampled uniformly at random from the unit rectangle. Fit a lasso model using 5-fold CV to choose $\lambda$ and fix this value of the tuning parameter.
+
+I'll use the same setup as in exercise 8 part (a). Running 5-fold cross validation 20 times the best lambda is $\lambda=0.129155$. I'll fix this parameter from now on.
+
+```{r}
+iterations <- 25
+variables <- 50
+x <- matrix(ncol=variables, nrow=iterations, byrow = FALSE)
+nom <- c()
+
+set.seed(1991)
+for(i in 1:variables){
+  temp <- runif(25, min = 0, max = 1)
+  x[,i] <- temp
+  nom[i] <- paste0('x',i)
+}
+
+colnames(x) <- nom
+
+x1 <- x[,1]
+x2 <- x[,2]
+x3 <- x[,3]
+x4 <- x[,4]
+x5 <- x[,5]
+e <- rnorm(25, mean = 0, sd = 1)
+y <- x1+2*x2+3*x3+4*x4+5*x5+e
+
+data <- data.frame(x,y)
+
+# Creating a set of possible values for lambda
+lambdas <- 10^seq(0,-2,length.out=100)
+```
+
+```{r, eval=FALSE}
+set.seed(1995)
+fit <- cv.lasso(x=x, y=y, alpha = 1, lambda = lambdas, k=5,repeats = 20)
+best.lambda <- best.lambda.test(fit)
+best.mse.test <- best.mse.lasso(fit)
+```
+
+## Part (b)
+
+Suppose we want to estimate the degrees of freedom for this model (i.e. we didn’t know the theoretical result we talked about in class). We could bootstrap the rows of our data so that each time we get dataset of the form $\tilde{\mathcal{D}} = \{(\tilde{x_{1}},\tilde{y_{1}}), ..., (\tilde{x_{25}},\tilde{y_{25}})\}$ where we save the values $\tilde{y}_{i}$ as well as the fitted values $\hat{y}_{i}$ for $i = 1, ..., 25$. Repeat this process with $B$ bootstrap samples and at the end, calculate the empirical covariance between each of the $\tilde{y}_{i}$ and the $\hat{y}_{i}$ which we can use as a proxy for $Cov(\hat{y}_{i},y_{i})$
+
+$$\widehat{Cov}(\hat{y}_{i},y_{i}) = \frac{1}{B} \sum_{b=1}^{B} \left( \hat{y}_{i}^{(b)} - \hat{\mathbb{E}}(\hat{y}) \right) \left( \tilde{y}_{i}^{(b)} - \hat{\mathbb{E}}(\tilde{y}) \right)$$
+
+We could then estimate the degrees of freedom by
+
+$$\hat{df}(\hat{y}) = \frac{1}{\sigma^{2}} \sum_{i=1}^{n} \widehat{Cov}(\hat{y}_{i},y_{i})$$
+
+Using your data and $\lambda$ from part (a), try this with $B = 1000$.
+
+After doing the computations using the value for lambda obtained in part (a) I obtained $\hat{df}(\hat{y}) \approx 8$. It's wort mentioning that while running Lasso with the best lambda, i.e., $\lambda =0.129155$ 13 of the predictor variables have non-zero coefficient estimates. The intercept has also a non-zero coefficient estimate.
+
+```{r}
+set.seed(1920)
+allboots <- lapply(1:1000, function(z){ boots.fitted.tilde(data = data, lambda = best.lambda, alpha = 1) } )
+
+cov.yi <- sapply(1:25, boots.cov.yi, boots.list =allboots)
+
+exp.cov <- mean(cov.yi)
+```
+
+## Part (c)
+
+The estimator from (b) often doesn’t work that well. Why not? Hint: It may not be
+what you first think $–$ consider what’s fixed vs. random.
+
+When we take the bootstrap samples $\mathcal{D^{(b)}} = \{ (x_{1}^{(b)},y_{1}^{(b)}),...,(x_{25}^{(b)},y_{25}^{(b)}) \}$ we are randomizing pretty much everything with exception of the tuning parameter $\lambda$.
+
+## Part (d)
+
+A better way to estimate the degrees of freedom is with a residual bootstrap. This is carried out in exactly the same fashion as part (b) except that now each bootstrap dataset will be of the form $\tilde{\mathcal{D}} = \{ (x_{1},\tilde{y}_{1}),..., (x_{25},\tilde{y}_{25})\}$ where
+
+$$\tilde{y}_{i} = \hat{y}_{i}+\epsilon^{*}$$
+$\epsilon^{*}$ selected uniformly at random from the 25 residuals calculated on the original data. Do this procedure to estimate the degrees of freedom with $B = 1000$. Why would you expect this to be a better estimate?
+
+After doing the computations using the value for lambda obtained in part (a) I obtained $\hat{df}(\hat{y}) \approx 7$. As you might notice, this provide a better estimate for the degrees of freedom of the true model since Lasso for the true model has 6 degrees of freedom.
+
+In part (d) we're fizing the covariates, and only the response (through the sampled residuals) is gonna be random. This results in a closer approximation of the actual $df$ of the true model (6).
+
+```{r}
+set.seed(1910)
+original.fit <- glmnet(x,y, alpha =1, lambda = best.lambda)
+best.coefficients <- predict(original.fit,s = best.lambda, newx = x, 
+                             type = 'coefficients')
+origin.pred <- as.numeric(predict(original.fit, s = best.lambda, newx = x))
+origin.resid <- y - as.numeric(origin.pred)
+
+sample.boots <- lapply(1:1000, function(z){ 
+  boots.sample.errors(x = x, fitted.y = origin.pred, 
+                      original.residuals = origin.resid)})
+
+allboots.d <- lapply(sample.boots, boots.fitted.tilde.errors, 
+                     lambda = best.lambda, alpha = 1)
+
+cov.yi.d <- sapply(1:25, boots.cov.yi, boots.list =allboots.d)
+
+exp.cov.d <- mean(cov.yi.d)
+```
+
